@@ -1,10 +1,3 @@
 <resources>
-    <string name="app_name">Etiquetado de imagen ML</string>
-
-    <string name="BtnEtiquetarImagen">Reconocer objetos</string>
-    <string name="TxtResultado">Resultados de la imagen</string>
-    <string name="Resultados"></string>
-
-    <string name="MenuGaleria">Abrir galería</string>
-    <string name="MenuTraducir">Traducir</string>
+    <string name="app_name">VistaMed</string>
 </resources>
