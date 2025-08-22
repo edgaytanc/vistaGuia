@@ -1,13 +1,14 @@
 package com.pcychips.vistamed
 
 import android.os.Bundle
-import android.widget.TextView
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.launch
+import android.content.Intent
 
 class MainActivity : AppCompatActivity() {
 
@@ -15,38 +16,42 @@ class MainActivity : AppCompatActivity() {
     private val PREF_INITIAL_DATA_INSERTED = "initial_data_inserted"
 
     private val medicamentoViewModel: MedicamentoViewModel by viewModels {
-        object : ViewModelProvider.Factory {
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val database = AppDatabase.getDatabase(applicationContext)
-                val repository = MedicamentoRepository(database.medicamentoDao(), database.imagenCajaDao())
-                return MedicamentoViewModel(repository) as T
-            }
-        }
+        MedicamentoViewModelFactory((application as MedicamentosApplication).repository)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val textView = TextView(this).apply {
-            textSize = 18f
-            setPadding(40, 40, 40, 40)
-            text = "Cargando datos del backend local..."
-        }
-        setContentView(textView)
+        // Usamos nuestro nuevo layout
+        setContentView(R.layout.activity_main)
 
+        // Configuramos el RecyclerView
+        val recyclerView = findViewById<RecyclerView>(R.id.recyclerViewMedicamentos)
+        // Pasamos una función lambda al adapter que se ejecutará al hacer clic
+        val adapter = MedicamentoAdapter { medicamento ->
+            // Cuando el usuario pulsa un item, abrimos la actividad de edición
+            val intent = Intent(this, AddEditMedicamentoActivity::class.java).apply {
+                // Ponemos el ID del medicamento en el Intent como un "extra"
+                putExtra("MEDICAMENTO_ID", medicamento.id_medicamento)
+            }
+            startActivity(intent)
+        }
+        recyclerView.adapter = adapter
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+// Observamos los datos y los enviamos al adapter
         lifecycleScope.launch {
             medicamentoViewModel.medicamentos.collect { medicamentos ->
-                val stringBuilder = StringBuilder("--- DEMO BACKEND LOCAL ---\n\n")
-                if (medicamentos.isNotEmpty()) {
-                    stringBuilder.append("Consulta a la base de datos exitosa:\n\n")
-                    medicamentos.forEach { medicamento ->
-                        stringBuilder.append("- ${medicamento.nombre}\n")
-                        stringBuilder.append("  Dosis: ${medicamento.dosis ?: "N/A"}\n\n")
-                    }
-                } else {
-                    stringBuilder.append("La base de datos está vacía. Insertando datos de ejemplo...")
-                }
-                textView.text = stringBuilder.toString()
+                // El ListAdapter tiene un método especial 'submitList' que maneja las actualizaciones
+                adapter.submitList(medicamentos)
             }
+        }
+
+        // Configurar el botón flotante (FAB)
+        val fab = findViewById<FloatingActionButton>(R.id.fabAddMedicamento)
+        fab.setOnClickListener {
+            // ESTA ES LA LÓGICA QUE ABRE LA NUEVA PANTALLA
+            val intent = Intent(this@MainActivity, AddEditMedicamentoActivity::class.java)
+            startActivity(intent)
         }
 
         insertInitialDataIfNeeded()
@@ -57,7 +62,7 @@ class MainActivity : AppCompatActivity() {
         val initialDataInserted = prefs.getBoolean(PREF_INITIAL_DATA_INSERTED, false)
 
         if (!initialDataInserted) {
-            medicamentoViewModel.insertInitialData() // ¡Ahora esta llamada sí funcionará!
+            medicamentoViewModel.insertInitialData()
             prefs.edit().putBoolean(PREF_INITIAL_DATA_INSERTED, true).apply()
         }
     }
