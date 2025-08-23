@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Placeholder ProGuard para VistaMed-MVP
+# (Agregar reglas específicas de TFLite/MLKit si se ofusca en el futuro)
