@@ -1,8 +1,18 @@
 package com.vistamed.mgp.vistamedmvp.vision
 
+import android.graphics.Bitmap
+import org.tensorflow.lite.task.vision.detector.Detection
+
 class FakeDetector : Detector {
-    override fun detectRGB888(width: Int, height: Int, pixels: IntArray): List<Detection> {
-        // Esqueleto vacío: sin modelo aún.
+
+    // Se implementa la función 'detect' que exige la interfaz
+    override fun detect(bitmap: Bitmap, rotation: Int): List<Detection> {
+        // Como es un detector "falso", simplemente devuelve una lista vacía.
         return emptyList()
+    }
+
+    // Se implementa la función 'close' que también exige la interfaz
+    override fun close() {
+        // No hace nada, porque no hay recursos que liberar.
     }
 }

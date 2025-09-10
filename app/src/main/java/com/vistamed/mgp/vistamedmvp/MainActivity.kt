@@ -13,17 +13,20 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import com.vistamed.mgp.vistamedmvp.core.LabelUtils
 import com.vistamed.mgp.vistamedmvp.core.Prefs
 import com.vistamed.mgp.vistamedmvp.core.TtsEngine
-import com.vistamed.mgp.vistamedmvp.core.LabelUtils
 import com.vistamed.mgp.vistamedmvp.databinding.ActivityMainBinding
 import com.vistamed.mgp.vistamedmvp.ui.AnnounceThrottlerPerKey
+// IMPORT AÑADIDO: Esta línea le dice al código dónde encontrar AppMode
+import com.vistamed.mgp.vistamedmvp.ui.AppMode
 import com.vistamed.mgp.vistamedmvp.voice.CommandParser
 import com.vistamed.mgp.vistamedmvp.voice.VoiceCommandEngine
 import com.vistamed.mgp.vistamedmvp.vision.*
+import org.tensorflow.lite.task.vision.detector.Detection
 import java.util.concurrent.Executors
 
-enum class AppMode { EXPLORACION, BUSQUEDA }
+// LÍNEA ELIMINADA: El "enum class AppMode" que estaba aquí fue removido para evitar el conflicto.
 
 class MainActivity : AppCompatActivity() {
 
@@ -34,10 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var detector: Detector
 
     private var mode: AppMode = AppMode.EXPLORACION
-
-    // Throttling por etiqueta (exploración) o por “objetivo” (búsqueda)
     private val labelThrottler = AnnounceThrottlerPerKey(2200L)
-
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
     private val permLauncher = registerForActivityResult(
@@ -86,10 +86,11 @@ class MainActivity : AppCompatActivity() {
 
                 val analyzer = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .build()
                     .also {
-                        it.setAnalyzer(cameraExecutor, FrameAnalyzer(detector) { detections ->
-                            runOnUiThread { onDetections(detections) }
+                        it.setAnalyzer(cameraExecutor, FrameAnalyzer(detector) { detections, height, width ->
+                            runOnUiThread { onDetections(detections, height, width) }
                         })
                     }
 
@@ -107,7 +108,9 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun onDetections(list: List<Detection>) {
+    private fun onDetections(list: List<Detection>, imageHeight: Int, imageWidth: Int) {
+        binding.overlayView.setResults(list, imageHeight, imageWidth)
+
         if (list.isEmpty()) {
             updateStatus(extra = "(0 detecciones)")
             return
@@ -115,16 +118,21 @@ class MainActivity : AppCompatActivity() {
 
         when (mode) {
             AppMode.EXPLORACION -> {
-                // Tomamos la detección con mayor score
-                val top = list.maxByOrNull { it.score } ?: return
-                val label = top.label
-                val pos = SpatialHelper.horizontalZone(
-                    frameWidth = binding.cameraPreview.width.takeIf { it > 0 } ?: 1080,
-                    box = top.box
-                )
-                updateStatus(extra = "Detectado: $label • $pos (${String.format("%.2f", top.score)})")
+                // CORRECCIÓN: Accedemos al score a través de la primera categoría.
+                val top = list.maxByOrNull { it.categories.firstOrNull()?.score ?: 0f } ?: return
 
-                // Cooldown por etiqueta normalizada (para evitar spam)
+                // Obtenemos la primera categoría de forma segura
+                val topCategory = top.categories.firstOrNull()
+                val label = topCategory?.label ?: "desconocido"
+                val score = topCategory?.score ?: 0f
+
+                val pos = SpatialHelper.horizontalZone(
+                    frameWidth = imageWidth,
+                    box = top.boundingBox
+                )
+                // CORRECCIÓN: Usamos la variable 'score' que acabamos de obtener.
+                updateStatus(extra = "Detectado: $label • $pos (${String.format("%.2f", score)})")
+
                 val key = LabelUtils.normalize(label)
                 if (labelThrottler.shouldAnnounce(key)) {
                     tts.speak("Detectado $label a la $pos")
@@ -137,12 +145,14 @@ class MainActivity : AppCompatActivity() {
                     updateStatus(extra = "Búsqueda sin objetivo")
                     return
                 }
-                // ¿Alguna detección coincide con el objetivo? (normalización + sinónimos)
-                val match = list.firstOrNull { det -> LabelUtils.matches(target, det.label) }
+                val match = list.firstOrNull { det ->
+                    val label = det.categories.firstOrNull()?.label ?: ""
+                    LabelUtils.matches(target, label)
+                }
                 if (match != null) {
                     val pos = SpatialHelper.horizontalZone(
-                        frameWidth = binding.cameraPreview.width.takeIf { it > 0 } ?: 1080,
-                        box = match.box
+                        frameWidth = imageWidth,
+                        box = match.boundingBox
                     )
                     updateStatus(extra = "Buscando: ${LabelUtils.normalize(target)} • ¡encontrado!")
                     val key = "objetivo:${LabelUtils.normalize(target)}"
@@ -201,6 +211,7 @@ class MainActivity : AppCompatActivity() {
         voice.stop()
         tts.shutdown()
         cameraExecutor.shutdown()
+        detector.close()
         super.onDestroy()
     }
 }
