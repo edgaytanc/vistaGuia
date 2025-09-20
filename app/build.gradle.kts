@@ -61,7 +61,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
-    // TensorFlow Lite - La librería Task Vision ya incluye las dependencias necesarias del core y de support.
+    // TensorFlow Lite - La librería Task Vision ya incluye las dependencias necesarias.
     implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
 
     // Opcional: Delegado de GPU para aceleración por hardware
