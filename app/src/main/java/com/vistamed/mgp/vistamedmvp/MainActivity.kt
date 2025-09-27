@@ -23,7 +23,7 @@ import com.vistamed.mgp.vistamedmvp.ui.AppMode
 import com.vistamed.mgp.vistamedmvp.voice.CommandParser
 import com.vistamed.mgp.vistamedmvp.voice.VoiceCommandEngine
 import com.vistamed.mgp.vistamedmvp.vision.*
-import org.tensorflow.lite.task.vision.detector.Detection
+//import org.tensorflow.lite.task.vision.detector.Detection
 import java.util.concurrent.Executors
 
 // LÍNEA ELIMINADA: El "enum class AppMode" que estaba aquí fue removido para evitar el conflicto.

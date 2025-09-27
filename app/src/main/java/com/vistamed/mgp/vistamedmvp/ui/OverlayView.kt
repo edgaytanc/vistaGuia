@@ -1,81 +1,78 @@
 package com.vistamed.mgp.vistamedmvp.ui
 
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.*
 import android.util.AttributeSet
 import android.view.View
-import androidx.core.content.ContextCompat
-import com.vistamed.mgp.vistamedmvp.R
-import org.tensorflow.lite.task.vision.detector.Detection
+import com.vistamed.mgp.vistamedmvp.vision.Detection
 import kotlin.math.max
 
-class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs) {
+class OverlayView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
 
-    private var results: List<Detection> = listOf()
-    private val boxPaint = Paint()
-    private val textBackgroundPaint = Paint()
-    private val textPaint = Paint()
+    private var results: List<Detection> = emptyList()
+    private var imageWidth: Int = 1
+    private var imageHeight: Int = 1
 
-    private var scaleFactor: Float = 1f
-
-    init {
-        initPaints()
+    private val boxPaint = Paint().apply {
+        color = Color.GREEN
+        style = Paint.Style.STROKE
+        strokeWidth = 8f
+    }
+    private val textBackgroundPaint = Paint().apply {
+        color = Color.BLACK
+        style = Paint.Style.FILL
+    }
+    private val textPaint = Paint().apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+        textSize = 50f
     }
 
-    private fun initPaints() {
-        boxPaint.color = Color.BLACK // Puedes definir este color en colors.xml
-        boxPaint.style = Paint.Style.STROKE
-        boxPaint.strokeWidth = 8f
-
-        textBackgroundPaint.color = Color.BLACK
-        textBackgroundPaint.style = Paint.Style.FILL
-        textBackgroundPaint.textSize = 50f
-
-        textPaint.color = Color.WHITE
-        textPaint.style = Paint.Style.FILL
-        textPaint.textSize = 50f
+    fun setResults(detections: List<Detection>, imageHeight: Int, imageWidth: Int) {
+        results = detections
+        this.imageHeight = imageHeight
+        this.imageWidth = imageWidth
+        invalidate()
     }
 
-    override fun draw(canvas: Canvas) {
-        super.draw(canvas)
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (results.isEmpty()) return
+
+        val scaleFactor = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
+
         for (result in results) {
             val boundingBox = result.boundingBox
-            val top = boundingBox.top * scaleFactor
-            val bottom = boundingBox.bottom * scaleFactor
-            val left = boundingBox.left * scaleFactor
-            val right = boundingBox.right * scaleFactor
+            val score = result.categories.first().score
+            val label = result.categories.first().label
 
-            // Dibuja el rectángulo
-            val drawableRect = RectF(left, top, right, bottom)
-            canvas.drawRect(drawableRect, boxPaint)
+            val scaledBoundingBox = RectF(
+                boundingBox.left * imageWidth * scaleFactor,
+                boundingBox.top * imageHeight * scaleFactor,
+                boundingBox.right * imageWidth * scaleFactor,
+                boundingBox.bottom * imageHeight * scaleFactor
+            )
 
-            // Dibuja la etiqueta con el texto
-            val drawableText = "${result.categories[0].label} " +
-                    String.format("%.2f", result.categories[0].score)
+            canvas.drawRect(scaledBoundingBox, boxPaint)
+            val drawableText = "$label ${String.format("%.2f", score)}"
+            val textBounds = Rect()
+            textPaint.getTextBounds(drawableText, 0, drawableText.length, textBounds)
+            val textWidth = textBounds.width()
+            val textHeight = textBounds.height()
 
-            val textWidth = textPaint.measureText(drawableText)
-            val textHeight = textPaint.descent() - textPaint.ascent()
-            val textBackgroundRect = RectF(left, top, left + textWidth + 8, top + textHeight)
-            canvas.drawRect(textBackgroundRect, textBackgroundPaint)
-            canvas.drawText(drawableText, left + 4, top + textHeight - textPaint.descent(), textPaint)
+            canvas.drawRect(
+                scaledBoundingBox.left,
+                scaledBoundingBox.top - textHeight - 8f,
+                scaledBoundingBox.left + textWidth + 8f,
+                scaledBoundingBox.top,
+                textBackgroundPaint
+            )
+            canvas.drawText(
+                drawableText,
+                scaledBoundingBox.left + 4f,
+                scaledBoundingBox.top - 4f,
+                textPaint
+            )
         }
-    }
-
-    fun setResults(
-        detectionResults: List<Detection>,
-        imageHeight: Int,
-        imageWidth: Int,
-    ) {
-        results = detectionResults
-        scaleFactor = max(width * 1f / imageWidth, height * 1f / imageHeight)
-        invalidate() // Redibuja la vista
-    }
-
-    fun clear() {
-        results = listOf()
-        invalidate()
     }
 }

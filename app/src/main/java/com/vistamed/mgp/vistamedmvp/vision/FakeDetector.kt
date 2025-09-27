@@ -1,7 +1,7 @@
 package com.vistamed.mgp.vistamedmvp.vision
 
 import android.graphics.Bitmap
-import org.tensorflow.lite.task.vision.detector.Detection
+//import org.tensorflow.lite.task.vision.detector.Detection
 
 class FakeDetector : Detector {
 

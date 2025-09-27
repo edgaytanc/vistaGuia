@@ -2,68 +2,96 @@ package com.vistamed.mgp.vistamedmvp.vision
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Matrix
+import android.graphics.RectF
 import android.util.Log
+import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.support.common.FileUtil
+import org.tensorflow.lite.support.common.ops.NormalizeOp // Volvemos a necesitar este import
+import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.task.core.BaseOptions
-import org.tensorflow.lite.task.vision.detector.Detection
-import org.tensorflow.lite.task.vision.detector.ObjectDetector
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import org.tensorflow.lite.support.image.ops.ResizeOp
+
+// ===================================================================
+// Estas son nuestras clases personalizadas, no las borres.
+data class Category(val label: String, val score: Float)
+data class Detection(val boundingBox: RectF, val categories: List<Category>)
+// ===================================================================
 
 class TfliteDetector(
-    private val context: Context,
+    context: Context,
     private val modelPath: String = "vistamed_yolov8n_float16_nms.tflite",
-    private val scoreThreshold: Float = 0.1f,
-    private val maxResults: Int = 3
+    private val scoreThreshold: Float = 0.3f
 ) : Detector {
 
-    private var objectDetector: ObjectDetector? = null
+    private val interpreter: Interpreter
+    private val imageWidth: Int
+    private val imageHeight: Int
+    private val TAG = "TfliteDetector"
 
     init {
-        setupDetector()
-    }
-
-    private fun setupDetector() {
-        try {
-            val options = ObjectDetector.ObjectDetectorOptions.builder()
-                .setBaseOptions(BaseOptions.builder().build())
-                .setScoreThreshold(scoreThreshold)
-                .setMaxResults(maxResults)
-                .build()
-            objectDetector = ObjectDetector.createFromFileAndOptions(context, modelPath, options)
-        } catch (e: Exception) {
-            Log.e("TfliteDetector", "Error initializing detector", e)
-        }
+        val model = FileUtil.loadMappedFile(context, modelPath)
+        interpreter = Interpreter(model, Interpreter.Options().apply { numThreads = 4 })
+        val inputShape = interpreter.getInputTensor(0).shape()
+        imageHeight = inputShape[1]
+        imageWidth = inputShape[2]
+        Log.d(TAG, "✅ Intérprete inicializado para imágenes de ${imageWidth}x${imageHeight}")
     }
 
     override fun detect(bitmap: Bitmap, rotation: Int): List<Detection> {
-        if (objectDetector == null) {
-            return emptyList()
-        }
+        Log.d(TAG, "➡️ Recibido nuevo frame para detectar. Tamaño: ${bitmap.width}x${bitmap.height}")
 
-        // Paso 1: Rotar el bitmap si es necesario
-        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-        val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        // --- LA CORRECCIÓN FINAL: USAR EL PROCESADOR OFICIAL ---
+        // Este método es el estándar y garantiza la correcta normalización de píxeles.
+        val imageProcessor = ImageProcessor.Builder()
+            .add(ResizeOp(imageHeight, imageWidth, ResizeOp.ResizeMethod.BILINEAR))
+            .add(NormalizeOp(0.0f, 255.0f)) // Normaliza los píxeles al rango [0, 1]
+            .build()
 
-        // Paso 2: Redimensionar el bitmap a 640x640 y crear un TensorImage
-        val resizedBitmap = Bitmap.createScaledBitmap(rotatedBitmap, 640, 640, true)
-        val tensorImage = TensorImage.fromBitmap(resizedBitmap)
+        // Creamos un TensorImage y lo procesamos.
+        val tensorImage = imageProcessor.process(TensorImage.fromBitmap(bitmap))
 
-        // paso adicional para el log
-        val detections = objectDetector?.detect(tensorImage) ?: emptyList()
-        Log.d("TfliteDetector", "Detecciones encontradas: ${detections.size}")
-        for (detection in detections) {
-            Log.d("TfliteDetector", "Clase: ${detection.categories[0].label}, Confianza: ${detection.categories[0].score}")
+        // El 'imageBuffer' ahora contiene la imagen perfectamente formateada.
+        val imageBuffer = tensorImage.buffer
+        // --- FIN DE LA CORRECCIÓN ---
+
+        val outputBuffer = Array(1) { Array(300) { FloatArray(6) } }
+        interpreter.run(imageBuffer, outputBuffer)
+
+        Log.d(TAG, "🧠 Modelo ejecutado. Procesando resultados...")
+
+        return postProcess(outputBuffer[0])
+    }
+
+    private fun postProcess(output: Array<FloatArray>): List<Detection> {
+        val detections = mutableListOf<Detection>()
+        val maxScore = output.maxOfOrNull { it[4] } ?: -1f
+        Log.d(TAG, "🔎 Confianza máxima encontrada en este frame: ${String.format("%.4f", maxScore)}")
+
+        for (detectionData in output) {
+            val score = detectionData[4]
+            if (score > scoreThreshold) {
+                val cx = detectionData[0]
+                val cy = detectionData[1]
+                val w = detectionData[2]
+                val h = detectionData[3]
+
+                Log.d(TAG, "👍 Detección VÁLIDA encontrada con confianza: ${String.format("%.2f", score)}")
+
+                val left = cx - w / 2
+                val top = cy - h / 2
+                val right = cx + w / 2
+                val bottom = cy + h / 2
+
+                val boundingBox = RectF(left, top, right, bottom)
+                val category = Category(label = "caja", score = score)
+                val detection = Detection(boundingBox = boundingBox, categories = listOf(category))
+                detections.add(detection)
+            }
         }
         return detections
-
-        // Paso 3: Realizar la detección
-        return objectDetector?.detect(tensorImage) ?: emptyList()
     }
 
     override fun close() {
-        objectDetector?.close()
-        objectDetector = null
+        interpreter.close()
     }
 }
