@@ -1,3 +1,4 @@
 Diclofenaco
 Ibuprofeno
+acetaminofen
 ketorolaco

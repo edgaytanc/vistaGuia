@@ -6,13 +6,13 @@ plugins {
 
 android {
     namespace = "com.vistamed.mgp.vistamedmvp"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.vistamed.mgp.vistamedmvp"
-        minSdk = 24
-        targetSdk = 34
-        versionCode = 1
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 4
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -44,6 +44,7 @@ android {
             "META-INF/*.kotlin_module"
         )
     }
+    buildToolsVersion = "35.0.0"
 }
 
 dependencies {
