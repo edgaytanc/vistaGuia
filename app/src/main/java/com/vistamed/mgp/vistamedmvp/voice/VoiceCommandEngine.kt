@@ -6,55 +6,115 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
+import java.util.*
 
 class VoiceCommandEngine(
     private val context: Context,
-    private val onText: (String) -> Unit
-) : RecognitionListener {
+    private val onCommand: (text: String) -> Unit,
 
-    private var recognizer: SpeechRecognizer? = null
-    private var active = false
+    // --- CAMBIO CLAVE 1 ---
+    // Añadimos un callback para que el motor de voz pueda
+    // "pedir" que se reinicie el bucle de escucha.
+    private val onRestartRequest: () -> Unit
+) {
+    private val TAG = "VoiceCommandEngine"
+    private var isAvailable = false
+    private var speechRecognizer: SpeechRecognizer? = null
 
+    private val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-GT")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    }
+
+    private val recognitionListener = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {
+            Log.d(TAG, "🎤 Listo para escuchar...")
+        }
+
+        override fun onResults(results: Bundle?) {
+            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+            if (text.isNotBlank()) {
+                Log.i(TAG, "Comando recibido: $text")
+                // 1. Comando recibido: Se lo pasamos a MainActivity.
+                // MainActivity llamará a TTS, y el ciclo se reiniciará solo.
+                onCommand(text)
+            } else {
+                // 2. No se oyó texto: Pedimos reiniciar el bucle.
+                Log.w(TAG, "No se recibió texto, pidiendo reinicio.")
+                onRestartRequest()
+            }
+        }
+
+        override fun onEndOfSpeech() {
+            Log.d(TAG, "🎤 Fin de la voz.")
+            // onResults se llamará después, así que no hacemos nada aquí.
+        }
+
+        override fun onError(error: Int) {
+            val errorMsg = when (error) {
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Error: Permisos insuficientes"
+                SpeechRecognizer.ERROR_NO_MATCH -> "Error: No se entendió"
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Error: Silencio"
+                else -> "Error: Otro ($error)"
+            }
+            Log.e(TAG, errorMsg)
+
+            // --- CAMBIO CLAVE 2 ---
+            // 3. Ocurrió un error (ej. silencio): Pedimos reiniciar el bucle.
+            // Esto es lo que arregla el bug.
+            onRestartRequest()
+        }
+
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    }
+
+    /**
+     * Inicia la escucha. (Llamado por MainActivity)
+     */
     fun start() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) return
-        if (active) return
-        active = true
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(this@VoiceCommandEngine)
+        if (!isAvailable) return
+        Log.d(TAG, "Iniciando escucha...")
+        try {
+            speechRecognizer?.startListening(recognizerIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al iniciar escucha: ${e.message}")
         }
-        listen()
     }
 
+    /**
+     * Detiene la escucha. (Llamado por MainActivity)
+     */
     fun stop() {
-        active = false
-        recognizer?.stopListening()
-        recognizer?.destroy()
-        recognizer = null
+        if (!isAvailable) return
+        Log.d(TAG, "Deteniendo escucha.")
+        speechRecognizer?.stopListening()
     }
 
-    private fun listen() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-GT")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+    /**
+     * Activa el motor.
+     */
+    fun activate() {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            Log.e(TAG, "❌ Reconocimiento de voz NO disponible en este dispositivo.")
+            isAvailable = false
+            return
         }
-        recognizer?.startListening(intent)
+
+        if (speechRecognizer == null) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(recognitionListener)
+            }
+        }
+
+        Log.d(TAG, "Motor de voz ACTIVADO y listo.")
+        isAvailable = true
+        // NO llamamos a start() aquí. MainActivity tiene el control.
     }
-
-    override fun onReadyForSpeech(params: Bundle?) {}
-    override fun onBeginningOfSpeech() {}
-    override fun onRmsChanged(rmsdB: Float) {}
-    override fun onBufferReceived(buffer: ByteArray?) {}
-    override fun onEndOfSpeech() {}
-    override fun onError(error: Int) { if (active) listen() }
-    override fun onPartialResults(partialResults: Bundle) {}
-
-    override fun onResults(results: Bundle) {
-        val list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
-        val text = list.firstOrNull() ?: return
-        onText(text)
-        if (active) listen()
-    }
-
-    override fun onEvent(eventType: Int, params: Bundle?) {}
 }

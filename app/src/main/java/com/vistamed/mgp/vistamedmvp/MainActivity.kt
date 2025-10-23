@@ -68,18 +68,38 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         tts = TtsEngine(this)
-        // Asigna los callbacks para evitar retroalimentación
+
+        // 1. Define la función de reinicio UNA VEZ.
+        // Usamos runOnUiThread para evitar conflictos de hilos
+        val restartVoiceLoop: () -> Unit = {
+            runOnUiThread {
+                voice.start()
+            }
+        }
+
+
+        // 2. Asigna esta función a AMBOS callbacks
         tts.onStartSpeaking = {
-            voice.stop() // Pausa el reconocimiento de voz
+            voice.stop()
         }
-        tts.onDoneSpeaking = {
-            voice.start() // Reanuda el reconocimiento de voz
-        }
+        tts.onDoneSpeaking = restartVoiceLoop // Cuando el TTS termine, reinicia
 
         prefs = Prefs(this)
 
         detector = try { TfliteDetector(this) } catch (_: Exception) { FakeDetector() }
-        voice = VoiceCommandEngine(this) { text -> handleVoice(text) }
+        // 3. Pasa la función de reinicio al nuevo constructor
+        voice = VoiceCommandEngine(
+            this,
+            { text -> handleVoice(text) }, // onCommand
+            restartVoiceLoop               // onRestartRequest
+        )
+
+        // ESTA ES LA LÍNEA QUE FALTABA:
+        // Le dice al motor de voz que está "listo" para empezar
+        voice.activate()
+
+        // --- OCR --- (Esto parece que lo quitaste, lo cual está bien por ahora)
+        // textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
         updateStatus()
         requestPermissionsIfNeeded()

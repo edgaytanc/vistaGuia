@@ -23,7 +23,7 @@ class TfliteDetector(
     context: Context,
     private val modelPath: String = "vistamed_yolov8n_float16_nms.tflite",
     private val labelPath: String = "labels.txt", // Nombre del archivo de etiquetas
-    private val scoreThreshold: Float = 0.5f // Podemos subir el umbral para mayor precisión
+    private val scoreThreshold: Float = 0.6f // Podemos subir el umbral para mayor precisión
 ) : Detector {
 
     private val interpreter: Interpreter
