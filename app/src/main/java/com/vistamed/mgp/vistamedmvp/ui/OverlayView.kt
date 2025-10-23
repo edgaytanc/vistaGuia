@@ -1,15 +1,24 @@
 package com.vistamed.mgp.vistamedmvp.ui
 
 import android.content.Context
-import android.graphics.*
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 import com.vistamed.mgp.vistamedmvp.vision.Detection
-import kotlin.math.max
+import kotlin.math.min
 
-class OverlayView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
+// (Importaciones de la clase Detection)
 
-    private var results: List<Detection> = emptyList()
+class OverlayView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : View(context, attrs) {
+
+    private var detections: List<Detection> = listOf()
+    private var scaleFactor: Float = 1f
     private var imageWidth: Int = 1
     private var imageHeight: Int = 1
 
@@ -18,10 +27,16 @@ class OverlayView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         style = Paint.Style.STROKE
         strokeWidth = 8f
     }
+
     private val textBackgroundPaint = Paint().apply {
+        // =======================================================
+        // SUGERENCIA 2: Fondo sólido (Negro con 80% opacidad)
+        // =======================================================
         color = Color.BLACK
+        alpha = 204 // Aprox 80%
         style = Paint.Style.FILL
     }
+
     private val textPaint = Paint().apply {
         color = Color.WHITE
         style = Paint.Style.FILL
@@ -29,7 +44,7 @@ class OverlayView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
 
     fun setResults(detections: List<Detection>, imageHeight: Int, imageWidth: Int) {
-        results = detections
+        this.detections = detections
         this.imageHeight = imageHeight
         this.imageWidth = imageWidth
         invalidate()
@@ -37,42 +52,62 @@ class OverlayView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (results.isEmpty()) return
 
-        val scaleFactor = max(width.toFloat() / imageWidth, height.toFloat() / imageHeight)
+        // Calcular el factor de escala
+        scaleFactor = min(width / imageWidth.toFloat(), height / imageHeight.toFloat())
 
-        for (result in results) {
-            val boundingBox = result.boundingBox
-            val score = result.categories.first().score
-            val label = result.categories.first().label
+        for (detection in detections) {
+            val boundingBox = detection.boundingBox
+            val category = detection.categories.firstOrNull() ?: continue
 
-            val scaledBoundingBox = RectF(
-                boundingBox.left * imageWidth * scaleFactor,
-                boundingBox.top * imageHeight * scaleFactor,
-                boundingBox.right * imageWidth * scaleFactor,
-                boundingBox.bottom * imageHeight * scaleFactor
-            )
+            // 1. Ajustar coordenadas del BoundingBox (Coordenadas Normalizadas)
+            // Las coordenadas ya vienen de 0.0 a 1.0, las escalamos a la vista
+            val left = boundingBox.left * width
+            val top = boundingBox.top * height
+            val right = boundingBox.right * width
+            val bottom = boundingBox.bottom * height
+            val scaledBox = RectF(left, top, right, bottom)
 
-            canvas.drawRect(scaledBoundingBox, boxPaint)
-            val drawableText = "$label ${String.format("%.2f", score)}"
-            val textBounds = Rect()
-            textPaint.getTextBounds(drawableText, 0, drawableText.length, textBounds)
+            // 2. Dibujar el BoundingBox
+            canvas.drawRect(scaledBox, boxPaint)
+
+            // =======================================================
+            // SUGERENCIA 2: Mostrar solo la etiqueta
+            // =======================================================
+            val textToDisplay = category.label // <-- SOLO LA ETIQUETA
+
+            // 3. Dibujar fondo y texto
+            val textBounds = RectF()
+            textPaint.getTextBounds(textToDisplay, 0, textToDisplay.length, textBounds.toAndroidRect())
             val textWidth = textBounds.width()
             val textHeight = textBounds.height()
 
-            canvas.drawRect(
-                scaledBoundingBox.left,
-                scaledBoundingBox.top - textHeight - 8f,
-                scaledBoundingBox.left + textWidth + 8f,
-                scaledBoundingBox.top,
-                textBackgroundPaint
+            // Ajusta el fondo del texto
+            textBounds.set(
+                scaledBox.left,
+                scaledBox.top - textHeight - 10,
+                scaledBox.left + textWidth + 20,
+                scaledBox.top
             )
+            canvas.drawRect(textBounds, textBackgroundPaint)
+
+            // Dibuja el texto
             canvas.drawText(
-                drawableText,
-                scaledBoundingBox.left + 4f,
-                scaledBoundingBox.top - 4f,
+                textToDisplay,
+                scaledBox.left + 10,
+                scaledBox.top - 10,
                 textPaint
             )
         }
+    }
+
+    // Extensión para convertir RectF a Rect (necesario para getTextBounds)
+    private fun RectF.toAndroidRect(): android.graphics.Rect {
+        return android.graphics.Rect(
+            this.left.toInt(),
+            this.top.toInt(),
+            this.right.toInt(),
+            this.bottom.toInt()
+        )
     }
 }
