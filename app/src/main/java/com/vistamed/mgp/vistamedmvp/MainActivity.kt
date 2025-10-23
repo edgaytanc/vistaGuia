@@ -2,6 +2,7 @@ package com.vistamed.mgp.vistamedmvp
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.RectF
 import android.os.Build
 import android.os.Bundle
 import android.os.Vibrator
@@ -41,6 +42,16 @@ class MainActivity : AppCompatActivity() {
     // Throttler para "sigo buscando"
     private val searchingThrottler = AnnounceThrottlerPerKey(8000L) // 8 segundos
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+
+    // =======================================================
+    // VARIABLES PARA FILTRO DE ESTABILIDAD
+    // =======================================================
+    private var isCameraStabilizing = true // Para la Solución 2
+    private var lastSeenLabel: String? = null
+    private var consecutiveDetections = 0
+    private val STABILITY_THRESHOLD = 3 // Requerir 3 frames seguidos
+    private val MIN_BOX_SIZE = 0.04f // Requerir que la caja ocupe al menos 4% de la pantalla
+    // =======================================================
 
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -109,7 +120,11 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider.bindToLifecycle(this, selector, preview, analyzer)
 
                 tts.speak("Bienvenido a VistaMed. Di, activar exploración o modo búsqueda.")
-                // El TTS ahora controla cuándo inicia 'voice'
+
+                // Ignora detecciones por 2.5 segundos mientras la cámara estabiliza
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    isCameraStabilizing = false
+                }, 2500) // 2.5 segundos
 
                 updateStatus()
 
@@ -119,34 +134,54 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    // =======================================================
+    // FUNCIÓN onDetections() MODIFICADA
+    // =======================================================
     private fun onDetections(list: List<Detection>, imageHeight: Int, imageWidth: Int) {
+        // 1. Filtro de estabilización de cámara
+        if (isCameraStabilizing) return
+
         binding.overlayView.setResults(list, imageHeight, imageWidth)
 
-        if (list.isEmpty()) {
+        // 2. Obtener la mejor detección (la de mayor confianza)
+        val top = list.maxByOrNull { it.categories.firstOrNull()?.score ?: 0f }
+
+        // 3. Filtro de Tamaño y Confianza
+        // Si no hay detección 'top', o si la que hay es muy pequeña, reseteamos el contador
+        if (top == null || isBoxTooSmall(top.boundingBox)) {
+            resetStability()
             updateStatus(extra = "(0 detecciones)")
             return
         }
 
+        // Si llegamos aquí, 'top' es un objeto válido y de tamaño decente
+        val topCategory = top.categories.first()
+        val label = topCategory.label
+        val score = topCategory.score
+
+        // 4. Lógica de Estabilidad
+        if (label == lastSeenLabel) {
+            consecutiveDetections++ // Vimos el mismo objeto otra vez
+        } else {
+            lastSeenLabel = label // Vimos un objeto nuevo
+            consecutiveDetections = 1 // Reseteamos el contador a 1
+        }
+
+        // 5. Comprobar si la detección es "estable"
+        val isStable = consecutiveDetections >= STABILITY_THRESHOLD
+
         when (mode) {
             AppMode.EXPLORACION -> {
-                val top = list.maxByOrNull { it.categories.firstOrNull()?.score ?: 0f } ?: return
-                val topCategory = top.categories.firstOrNull()
-                val label = topCategory?.label ?: "desconocido"
-                val score = topCategory?.score ?: 0f
-
-                val pos = SpatialHelper.horizontalZone(
-                    box = top.boundingBox
-                )
-                updateStatus(extra = "Detectado: $label • $pos (${String.format("%.2f", score)})")
+                val pos = SpatialHelper.horizontalZone(box = top.boundingBox)
+                val stabilityMarker = if (isStable) "✅" else "⌛" // Feedback visual de estabilidad
+                updateStatus(extra = "Detectado: $label $stabilityMarker (${String.format("%.2f", score)})")
 
                 val key = LabelUtils.normalize(label)
 
-                // =======================================================
-                // SUGERENCIA 3 y 4: Throttler + Vibración
-                // =======================================================
-                if (labelThrottler.shouldAnnounce(key)) {
+                // ANUNCIAR SOLO SI ES ESTABLE
+                if (isStable && labelThrottler.shouldAnnounce(key)) {
                     tts.speak("Detectado $label a la $pos")
-                    vibrateShort() // <-- AÑADIDO: Vibración en modo exploración
+                    vibrateShort()
                 }
             }
 
@@ -159,50 +194,67 @@ class MainActivity : AppCompatActivity() {
 
                 // Lógica de "mejor" coincidencia
                 val matches = list.filter { det ->
-                    val label = det.categories.firstOrNull()?.label ?: ""
-                    LabelUtils.matches(target, label)
+                    val labelMatch = det.categories.firstOrNull()?.label ?: ""
+                    !isBoxTooSmall(det.boundingBox) && LabelUtils.matches(target, labelMatch) // Filtra también por tamaño
                 }
                 val bestMatch = matches.maxByOrNull { it.categories.firstOrNull()?.score ?: 0f }
 
                 if (bestMatch != null) {
-                    val pos = SpatialHelper.horizontalZone(
-                        box = bestMatch.boundingBox
-                    )
+                    val pos = SpatialHelper.horizontalZone(box = bestMatch.boundingBox)
                     updateStatus(extra = "Buscando: ${LabelUtils.normalize(target)} • ¡encontrado!")
 
                     val key = "objetivo:${LabelUtils.normalize(target)}"
-                    // (Esto ya estaba implementado correctamente)
+                    // (Aquí no es necesaria la estabilidad, solo el throttler,
+                    // porque el usuario está buscando activamente)
                     if (labelThrottler.shouldAnnounce(key)) {
                         tts.speak("${target} encontrado a la $pos")
                         vibrateShort()
                     }
+                    resetStability() // Resetea el contador de exploración
                 } else {
                     val targetName = LabelUtils.normalize(target)
                     updateStatus(extra = "Buscando: $targetName")
-                    // Feedback "sigo buscando"
                     if (searchingThrottler.shouldAnnounce("buscando:$targetName")) {
                         tts.speak("Sigo buscando $targetName")
                     }
+                    resetStability() // Resetea el contador de exploración
                 }
             }
         }
     }
 
+    // Funciones auxiliares para la estabilidad
+    private fun isBoxTooSmall(box: RectF): Boolean {
+        val area = (box.right - box.left) * (box.bottom - box.top)
+        return area < MIN_BOX_SIZE
+    }
+
+    private fun resetStability() {
+        lastSeenLabel = null
+        consecutiveDetections = 0
+    }
+    // =======================================================
+    // FIN DE FUNCIONES MODIFICADAS
+    // =======================================================
+
     private fun handleVoice(text: String) {
         when (val cmd = CommandParser.parse(text)) {
             is com.vistamed.mgp.vistamedmvp.voice.Command.ActivarExploracion -> {
                 mode = AppMode.EXPLORACION
+                resetStability()
                 tts.speak("Exploración activada")
                 updateStatus()
             }
             is com.vistamed.mgp.vistamedmvp.voice.Command.ModoBusqueda -> {
                 mode = AppMode.BUSQUEDA
+                resetStability()
                 tts.speak("Modo búsqueda activado. Di, buscar seguido del nombre del medicamento.")
                 updateStatus()
             }
             is com.vistamed.mgp.vistamedmvp.voice.Command.Buscar -> {
                 prefs.targetLabel = cmd.objetivo
                 mode = AppMode.BUSQUEDA
+                resetStability()
                 tts.speak("Buscando ${cmd.objetivo}")
                 updateStatus()
             }
