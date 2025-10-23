@@ -49,8 +49,8 @@ class MainActivity : AppCompatActivity() {
     private var isCameraStabilizing = true // Para la Solución 2
     private var lastSeenLabel: String? = null
     private var consecutiveDetections = 0
-    private val STABILITY_THRESHOLD = 3 // Requerir 3 frames seguidos
-    private val MIN_BOX_SIZE = 0.04f // Requerir que la caja ocupe al menos 4% de la pantalla
+    private val STABILITY_THRESHOLD = 5 // Requerir 3 frames seguidos
+    private val MIN_BOX_SIZE = 0.05f // Requerir que la caja ocupe al menos 4% de la pantalla
     // =======================================================
 
     private val permLauncher = registerForActivityResult(
