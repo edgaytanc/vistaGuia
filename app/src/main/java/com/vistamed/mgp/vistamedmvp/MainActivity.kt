@@ -18,15 +18,11 @@ import com.vistamed.mgp.vistamedmvp.core.Prefs
 import com.vistamed.mgp.vistamedmvp.core.TtsEngine
 import com.vistamed.mgp.vistamedmvp.databinding.ActivityMainBinding
 import com.vistamed.mgp.vistamedmvp.ui.AnnounceThrottlerPerKey
-// IMPORT AÑADIDO: Esta línea le dice al código dónde encontrar AppMode
 import com.vistamed.mgp.vistamedmvp.ui.AppMode
 import com.vistamed.mgp.vistamedmvp.voice.CommandParser
 import com.vistamed.mgp.vistamedmvp.voice.VoiceCommandEngine
 import com.vistamed.mgp.vistamedmvp.vision.*
-//import org.tensorflow.lite.task.vision.detector.Detection
 import java.util.concurrent.Executors
-
-// LÍNEA ELIMINADA: El "enum class AppMode" que estaba aquí fue removido para evitar el conflicto.
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,8 +32,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var detector: Detector
 
+
+
     private var mode: AppMode = AppMode.EXPLORACION
     private val labelThrottler = AnnounceThrottlerPerKey(2200L)
+    // Añade un throttler para el feedback de "buscando"
+    private val searchingThrottler = AnnounceThrottlerPerKey(8000L) // 8 segundos
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
     private val permLauncher = registerForActivityResult(
@@ -55,9 +55,18 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         tts = TtsEngine(this)
-        prefs = Prefs(this)
+        // Asigna los callbacks
+        tts.onStartSpeaking = {
+            voice.stop() // Pausa el reconocimiento de voz
+        }
+        tts.onDoneSpeaking = {
+            voice.start() // Reanuda el reconocimiento de voz
+        }
 
+        prefs = Prefs(this)
         detector = try { TfliteDetector(this) } catch (_: Exception) { FakeDetector() }
+
+        // Pasa el callback al motor de voz, PERO no lo inicies aquí
         voice = VoiceCommandEngine(this) { text -> handleVoice(text) }
 
         updateStatus()
@@ -99,7 +108,10 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider.bindToLifecycle(this, selector, preview, analyzer)
 
                 tts.speak("Bienvenido a VistaMed. Di, activar exploración o modo búsqueda.")
-                voice.start()
+                // IMPORTANTE: El TTS ahora controlará cuándo inicia 'voice' por primera vez.
+                // No llames a voice.start() aquí, el callback 'onDoneSpeaking' lo hará.
+//                voice.start()
+
                 updateStatus()
 
             } catch (e: Exception) {
@@ -118,19 +130,16 @@ class MainActivity : AppCompatActivity() {
 
         when (mode) {
             AppMode.EXPLORACION -> {
-                // CORRECCIÓN: Accedemos al score a través de la primera categoría.
                 val top = list.maxByOrNull { it.categories.firstOrNull()?.score ?: 0f } ?: return
-
-                // Obtenemos la primera categoría de forma segura
                 val topCategory = top.categories.firstOrNull()
                 val label = topCategory?.label ?: "desconocido"
                 val score = topCategory?.score ?: 0f
 
+                // --- LÍNEA CORREGIDA #1 ---
+                // Se eliminó el parámetro 'frameWidth' de la llamada.
                 val pos = SpatialHelper.horizontalZone(
-                    frameWidth = imageWidth,
-                    box = top.boundingBox
-                )
-                // CORRECCIÓN: Usamos la variable 'score' que acabamos de obtener.
+                    box = top.boundingBox)
+
                 updateStatus(extra = "Detectado: $label • $pos (${String.format("%.2f", score)})")
 
                 val key = LabelUtils.normalize(label)
@@ -145,14 +154,19 @@ class MainActivity : AppCompatActivity() {
                     updateStatus(extra = "Búsqueda sin objetivo")
                     return
                 }
-                val match = list.firstOrNull { det ->
+
+                // 1. Filtra TODAS las coincidencias
+                val matches = list.filter { det ->
                     val label = det.categories.firstOrNull()?.label ?: ""
                     LabelUtils.matches(target, label)
                 }
-                if (match != null) {
+
+                // 2. De las coincidencias, obtén la de MAYOR confianza
+                val bestMatch = matches.maxByOrNull { it.categories.firstOrNull()?.score ?: 0f }
+
+                if (bestMatch != null) {
                     val pos = SpatialHelper.horizontalZone(
-                        frameWidth = imageWidth,
-                        box = match.boundingBox
+                        box = bestMatch.boundingBox // Usa bestMatch
                     )
                     updateStatus(extra = "Buscando: ${LabelUtils.normalize(target)} • ¡encontrado!")
                     val key = "objetivo:${LabelUtils.normalize(target)}"
@@ -161,7 +175,14 @@ class MainActivity : AppCompatActivity() {
                         vibrateShort()
                     }
                 } else {
-                    updateStatus(extra = "Buscando: ${LabelUtils.normalize(target)}")
+                    val targetName = LabelUtils.normalize(target)
+                    updateStatus(extra = "Buscando: $targetName")
+
+                    // AÑADE ESTO:
+                    if (searchingThrottler.shouldAnnounce("buscando:$targetName")) {
+                        tts.speak("Sigo buscando $targetName")
+                    }
+
                 }
             }
         }
@@ -187,6 +208,13 @@ class MainActivity : AppCompatActivity() {
             }
             is com.vistamed.mgp.vistamedmvp.voice.Command.Detener -> {
                 tts.speak("Deteniendo")
+            }
+            is com.vistamed.mgp.vistamedmvp.voice.Command.ModoActual -> {
+                val modeTxt = when (mode) {
+                    AppMode.EXPLORACION -> "Exploración"
+                    AppMode.BUSQUEDA -> "Búsqueda"
+                }
+                tts.speak("El modo actual es $modeTxt")
             }
             else -> { /* ignorar */ }
         }

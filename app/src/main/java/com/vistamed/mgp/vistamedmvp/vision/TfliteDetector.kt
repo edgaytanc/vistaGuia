@@ -10,6 +10,8 @@ import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
+import org.tensorflow.lite.gpu.GpuDelegate // <--- AÑADE ESTA LÍNEA
+import org.tensorflow.lite.nnapi.NnApiDelegate // <--- AÑADE ESTA LÍNEA
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -21,7 +23,7 @@ class TfliteDetector(
     context: Context,
     private val modelPath: String = "vistamed_yolov8n_float16_nms.tflite",
     private val labelPath: String = "labels.txt", // Nombre del archivo de etiquetas
-    private val scoreThreshold: Float = 0.3f // Podemos subir el umbral para mayor precisión
+    private val scoreThreshold: Float = 0.5f // Podemos subir el umbral para mayor precisión
 ) : Detector {
 
     private val interpreter: Interpreter
@@ -33,8 +35,27 @@ class TfliteDetector(
     private val labels: List<String>
 
     init {
+        // Dentro de init en TfliteDetector.kt
         val model = FileUtil.loadMappedFile(context, modelPath)
-        interpreter = Interpreter(model, Interpreter.Options().apply { numThreads = 4 })
+        val options = Interpreter.Options().apply {
+            numThreads = 4 // Hilos para la CPU como respaldo
+            try {
+                // Intentar usar el delegado de NNAPI (Hardware de IA)
+                val nnApiDelegate = NnApiDelegate()
+                addDelegate(nnApiDelegate)
+                Log.d(TAG, "🚀 Delegado NNAPI aplicado.")
+            } catch (e: Exception) {
+                try {
+                    // Si NNAPI falla, intentar usar GPU
+                    val gpuDelegate = GpuDelegate()
+                    addDelegate(gpuDelegate)
+                    Log.d(TAG, "🟡 NNAPI falló, usando GPU Delegate.")
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Fallaron NNAPI y GPU. Usando CPU.")
+                }
+            }
+        }
+        interpreter = Interpreter(model, options)
         val inputShape = interpreter.getInputTensor(0).shape()
         imageHeight = inputShape[1]
         imageWidth = inputShape[2]

@@ -6,6 +6,7 @@ sealed class Command {
     data class Buscar(val objetivo: String) : Command()
     data object Detener : Command()
     data object Desconocido : Command()
+    data object ModoActual : Command()
 }
 
 object CommandParser {
@@ -16,6 +17,8 @@ object CommandParser {
             t.contains("modo búsqueda") || t.contains("modo busqueda") -> Command.ModoBusqueda
             t.startsWith("buscar ") -> Command.Buscar(t.removePrefix("buscar ").trim())
             t.contains("detener") || t.contains("parar") -> Command.Detener
+            t.contains("modo actual") -> Command.ModoActual
+            t.contains("qué modo") -> Command.ModoActual
             else -> Command.Desconocido
         }
     }

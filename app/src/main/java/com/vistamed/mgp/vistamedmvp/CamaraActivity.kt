@@ -13,7 +13,11 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.vistamed.mgp.vistamedmvp.databinding.ActivityCameraBinding
+// --- IMPORTACIONES NUEVAS ---
+import com.vistamed.mgp.vistamedmvp.core.TtsEngine
+import com.vistamed.mgp.vistamedmvp.ui.AnnounceThrottlerPerKey
 import com.vistamed.mgp.vistamedmvp.vision.FrameAnalyzer
+import com.vistamed.mgp.vistamedmvp.vision.SpatialHelper // Asegúrate de importar tu SpatialHelper
 import com.vistamed.mgp.vistamedmvp.vision.TfliteDetector
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -24,6 +28,10 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var detector: TfliteDetector
 
+    // --- PROPIEDADES NUEVAS PARA EL ANUNCIO DE VOZ ---
+    private lateinit var ttsEngine: TtsEngine
+    private val throttler = AnnounceThrottlerPerKey(5000) // Evita anuncios repetitivos (5 segundos)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityCameraBinding.inflate(layoutInflater)
@@ -31,6 +39,9 @@ class CameraActivity : AppCompatActivity() {
 
         detector = TfliteDetector(this)
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // --- INICIALIZAR EL MOTOR DE TEXTO A VOZ (TTS) ---
+        ttsEngine = TtsEngine(this)
 
         if (allPermissionsGranted()) {
             startCamera()
@@ -58,6 +69,28 @@ class CameraActivity : AppCompatActivity() {
             imageAnalyzer.setAnalyzer(cameraExecutor, FrameAnalyzer(detector) { results, height, width ->
                 runOnUiThread {
                     binding.overlayView.setResults(results, height, width)
+
+                    // ------------------------------------------------------------------
+                    // --- ¡AQUÍ ESTÁ LA LÓGICA AÑADIDA PARA EL ANUNCIO DE VOZ! ---
+                    // ------------------------------------------------------------------
+                    if (results.isNotEmpty()) {
+                        // Tomamos la primera detección como la principal
+                        val mainDetection = results.first()
+                        val label = mainDetection.categories.first().label
+
+                        // ¡Llamamos a la función corregida de SpatialHelper!
+                        // Nota que ya no se pasa 'width' como parámetro.
+                        val zona = SpatialHelper.horizontalZone(mainDetection.boundingBox)
+
+                        // Construimos el texto para el anuncio
+                        val textoAnuncio = "Detectado $label a la $zona"
+
+                        // Usamos el throttler para no repetir el mismo anuncio constantemente
+                        if (throttler.shouldAnnounce(label)) {
+                            ttsEngine.speak(textoAnuncio)
+                        }
+                    }
+                    // ------------------------------------------------------------------
                 }
             })
 
@@ -95,6 +128,8 @@ class CameraActivity : AppCompatActivity() {
         super.onDestroy()
         cameraExecutor.shutdown()
         detector.close()
+        // --- LIBERAR RECURSOS DE TTS ---
+        ttsEngine.shutdown()
     }
 
     companion object {

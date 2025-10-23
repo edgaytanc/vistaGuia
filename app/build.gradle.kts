@@ -63,9 +63,16 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
     // ===================================================================
-    // TensorFlow Lite - Las únicas 2 que necesitamos. Adiós a 'task-vision'.
+    // TensorFlow Lite
+
+    // Para el pre-procesamiento de imagen (ImageProcessor)
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+
+    // Para el intérprete (Interpreter) y el delegado NNAPI (NnApiDelegate)
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
+
+    // Para el delegado GPU (GpuDelegate)
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
     // ===================================================================
 
     // Tests
